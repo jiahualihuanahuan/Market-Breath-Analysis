@@ -1,3 +1,4 @@
+import os
 import io
 import requests
 import streamlit as st
@@ -50,25 +51,65 @@ def get_tickers():
             
     return df_sp500, df_nasdaq, df_dow
 
-@st.cache_data(show_spinner="Downloading historical data (this may take 1-3 minutes)...")
+@st.cache_data(show_spinner="Loading historical data (checking local CSVs first)...")
 def get_stock_data(tickers):
-    """Downloads historical daily close prices for the provided tickers."""
+    """Retrieves data from local CSVs. Downloads and saves missing data."""
     if not tickers:
-        st.warning("No tickers found to download. Please check the data source.")
+        st.warning("No tickers found to process. Please check the data source.")
         return pd.DataFrame()
         
-    data = yf.download(tickers, period="max", threads=True, progress=False)
+    close_prices = {}
+    missing_tickers = []
     
-    if data.empty:
+    # 1. Check local files first
+    for ticker in tickers:
+        filename = f"{ticker}.csv"
+        if os.path.exists(filename):
+            try:
+                # Read CSV and set the date as index
+                df = pd.read_csv(filename, index_col=0, parse_dates=True)
+                close_prices[ticker] = df['Close']
+            except Exception:
+                missing_tickers.append(ticker)
+        else:
+            missing_tickers.append(ticker)
+            
+    # 2. Download any missing tickers
+    if missing_tickers:
+        st.info(f"Downloading data for {len(missing_tickers)} missing ticker(s)...")
+        data = yf.download(missing_tickers, period="max", threads=True, progress=False)
+        
+        if not data.empty:
+            # Handle MultiIndex (multiple tickers) vs Single Index (one ticker)
+            if isinstance(data.columns, pd.MultiIndex):
+                if 'Close' in data.columns.levels[0]:
+                    close_data = data['Close']
+                else:
+                    close_data = pd.DataFrame()
+            else:
+                if 'Close' in data.columns:
+                    close_data = data[['Close']]
+                    close_data.columns = [missing_tickers[0]] # Rename single column to ticker symbol
+                else:
+                    close_data = pd.DataFrame()
+                    
+            # Extract valid data and save each to its own CSV
+            for ticker in missing_tickers:
+                if ticker in close_data.columns:
+                    ts = close_data[ticker].dropna()
+                    if not ts.empty:
+                        close_prices[ticker] = ts
+                        # Save specifically to current directory as a CSV
+                        ts.to_frame(name='Close').to_csv(f"{ticker}.csv")
+                        
+    # 3. Combine everything into a single DataFrame
+    if not close_prices:
         return pd.DataFrame()
         
-    # yfinance returns a MultiIndex column structure when querying multiple tickers
-    if isinstance(data.columns, pd.MultiIndex) and 'Close' in data.columns.levels[0]:
-        return data['Close']
-    elif 'Close' in data.columns:
-        return data['Close'] 
-    else:
-        return data  
+    df_combined = pd.DataFrame(close_prices)
+    df_combined = df_combined.sort_index()
+    
+    return df_combined
 
 # --- 2. SIDEBAR & USER INPUTS ---
 
@@ -93,7 +134,7 @@ history_days = st.sidebar.slider(
     help="Adjust how many trading days to show on the line chart (252 days ≈ 1 year)."
 )
 
-if st.sidebar.button("Load/Refresh Data"):
+if st.sidebar.button("Clear App Cache"):
     st.cache_data.clear()
 
 # --- 3. DATA PROCESSING ---
@@ -120,13 +161,12 @@ df_close = get_stock_data(selected_tickers)
 if not df_close.empty:
     
     # --- CALCULATIONS: Price Change ---
-    # Updated frequencies for Pandas 2.2+ compatibility
     resample_map = {
-        "Daily": "B",      # Business days
+        "Daily": "B",      
         "Weekly": "W",
-        "Monthly": "ME",   # Month End
-        "Quarterly": "QE", # Quarter End
-        "Yearly": "YE"     # Year End
+        "Monthly": "ME",   
+        "Quarterly": "QE", 
+        "Yearly": "YE"     
     }
     freq = resample_map.get(timeframe_choice, "B")
     
@@ -215,7 +255,6 @@ if not df_close.empty:
         pct_above_50_hist = ((df_close > sma_50_hist).sum(axis=1) / daily_active_stocks) * 100
         pct_above_200_hist = ((df_close > sma_200_hist).sum(axis=1) / daily_active_stocks) * 100
         
-        # Slices dataframe based on user slider input
         plot_dates = df_close.tail(history_days).index 
         
         fig_line = go.Figure()
@@ -247,30 +286,19 @@ if not df_close.empty:
     st.markdown("---")
     st.subheader(f"Component Performance & Index Contribution ({timeframe_choice})")
     
-    # Construct the table combining weights and price changes
     df_table = df_weights.set_index('Symbol').copy()
     
-    # Map the latest percentage change (converted to a 100-based percentage)
     df_table['Price Change (%)'] = pct_change_latest * 100
     
-    # --- BULLETPROOF TYPE CONVERSION ---
-    # Force the Weight column to be a numeric float, overriding any cached strings/PyArrow types
     df_table['Weight'] = pd.to_numeric(df_table['Weight'], errors='coerce').fillna(0.0)
-    
-    # Calculate Contribution: (Price Change %) * (Weight as decimal)
     df_table['Contribution (%)'] = df_table['Price Change (%)'] * (df_table['Weight'] / 100)
     
-    # Clean up NaNs (stocks that may have failed to download or delisted)
     df_table = df_table.dropna().reset_index()
-    
-    # Sort by the most impactful movers descending
     df_table = df_table.sort_values(by='Contribution (%)', ascending=False)
     
-    # Safeguard: Ensure the table isn't empty before applying colors
     if df_table.empty:
         st.warning("No valid data available to construct the contribution table for this period.")
     else:
-        # Use Pandas Styler to format decimals and add a heatmap color gradient
         styled_table = df_table.style.format({
             'Weight': '{:.4f}%',
             'Price Change (%)': '{:.2f}%',
