@@ -222,7 +222,7 @@ if not df_close.empty:
         
         # 4. Limit to the last 5 years to keep the chart performant and readable
         # (Optional: remove '.last("5Y")' to show the absolute maximum history)
-        plot_dates = df_close.last("1Y").index
+        plot_dates = df_close.tail(1000).index
         
         # 5. Build the Plotly line chart
         fig_line = go.Figure()
