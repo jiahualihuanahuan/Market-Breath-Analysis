@@ -17,57 +17,38 @@ st.markdown("Analyze how many stocks are moving up, down, or flat, and see how t
 
 # --- 1. DATA RETRIEVAL FUNCTIONS ---
 
-@st.cache_data(show_spinner="Fetching index components from Slickcharts...")
+@st.cache_data(show_spinner="Fetching index components and weights from Slickcharts...")
 def get_tickers():
-    """Scrapes Slickcharts for S&P 500, Nasdaq 100, and Dow Jones tickers."""
+    """Scrapes Slickcharts for index tickers and their weights."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
-    sp500_tickers = []
-    nasdaq_tickers = []
-    dow_tickers = []
-    
-    # Fetch S&P 500 tickers (Slickcharts)
-    try:
-        sp500_url = 'https://www.slickcharts.com/sp500'
-        resp_sp = requests.get(sp500_url, headers=headers)
-        sp500_tables = pd.read_html(io.StringIO(resp_sp.text))
-        
-        for table in sp500_tables:
-            if 'Symbol' in table.columns:
-                sp500_tickers = table['Symbol'].str.replace('.', '-', regex=False).tolist()
-                break
-    except Exception as e:
-        st.error(f"Error fetching S&P 500 tickers: {e}")
-    
-    # Fetch Nasdaq 100 tickers (Slickcharts)
-    try:
-        nasdaq_url = 'https://www.slickcharts.com/nasdaq100'
-        resp_nasdaq = requests.get(nasdaq_url, headers=headers)
-        nasdaq_tables = pd.read_html(io.StringIO(resp_nasdaq.text))
-        
-        for table in nasdaq_tables:
-            if 'Symbol' in table.columns:
-                nasdaq_tickers = table['Symbol'].str.replace('.', '-', regex=False).tolist()
-                break
-    except Exception as e:
-        st.error(f"Error fetching Nasdaq 100 tickers: {e}")
-        
-    # Fetch Dow Jones tickers (Slickcharts)
-    try:
-        dow_url = 'https://www.slickcharts.com/dowjones'
-        resp_dow = requests.get(dow_url, headers=headers)
-        dow_tables = pd.read_html(io.StringIO(resp_dow.text))
-        
-        for table in dow_tables:
-            if 'Symbol' in table.columns:
-                dow_tickers = table['Symbol'].str.replace('.', '-', regex=False).tolist()
-                break
-    except Exception as e:
-        st.error(f"Error fetching Dow Jones tickers: {e}")
+    def fetch_index(url):
+        try:
+            resp = requests.get(url, headers=headers)
+            tables = pd.read_html(io.StringIO(resp.text))
             
-    return sp500_tickers, nasdaq_tickers, dow_tickers
+            for table in tables:
+                if 'Symbol' in table.columns and 'Weight' in table.columns:
+                    df = table[['Symbol', 'Weight']].copy()
+                    df['Symbol'] = df['Symbol'].str.replace('.', '-', regex=False)
+                    
+                    # Clean up weight column (remove '%' if present and convert to float)
+                    if df['Weight'].dtype == object:
+                        df['Weight'] = df['Weight'].astype(str).str.replace('%', '', regex=False).astype(float)
+                    
+                    return df
+        except Exception as e:
+            st.error(f"Error fetching from {url}: {e}")
+            
+        return pd.DataFrame(columns=['Symbol', 'Weight'])
+
+    df_sp500 = fetch_index('https://www.slickcharts.com/sp500')
+    df_nasdaq = fetch_index('https://www.slickcharts.com/nasdaq100')
+    df_dow = fetch_index('https://www.slickcharts.com/dowjones')
+            
+    return df_sp500, df_nasdaq, df_dow
 
 @st.cache_data(show_spinner="Downloading historical data (this may take 1-3 minutes)...")
 def get_stock_data(tickers):
@@ -103,23 +84,36 @@ timeframe_choice = st.sidebar.selectbox(
     ("Daily", "Weekly", "Monthly", "Quarterly", "Yearly")
 )
 
+history_days = st.sidebar.slider(
+    "Historical Plot Lookback (Days)", 
+    min_value=30, 
+    max_value=2520, 
+    value=1260, 
+    step=30,
+    help="Adjust how many trading days to show on the line chart (252 days ≈ 1 year)."
+)
+
 if st.sidebar.button("Load/Refresh Data"):
     st.cache_data.clear()
 
 # --- 3. DATA PROCESSING ---
 
-# Get tickers
-sp500_tickers, nasdaq_tickers, dow_tickers = get_tickers()
+# Get DataFrames containing tickers and weights
+df_sp500, df_nasdaq, df_dow = get_tickers()
 
 if index_choice == "S&P 500":
-    selected_tickers = sp500_tickers
+    df_weights = df_sp500
 elif index_choice == "Nasdaq 100":
-    selected_tickers = nasdaq_tickers
+    df_weights = df_nasdaq
 elif index_choice == "Dow Jones":
-    selected_tickers = dow_tickers
+    df_weights = df_dow
 else:
-    # Combine all and remove duplicates
-    selected_tickers = list(set(sp500_tickers + nasdaq_tickers + dow_tickers)) 
+    # Combine all, group by symbol to handle overlaps, and recalculate relative weights to sum to 100%
+    df_weights = pd.concat([df_sp500, df_nasdaq, df_dow]).groupby('Symbol').mean().reset_index()
+    if df_weights['Weight'].sum() > 0:
+        df_weights['Weight'] = (df_weights['Weight'] / df_weights['Weight'].sum()) * 100
+
+selected_tickers = df_weights['Symbol'].tolist()
 
 df_close = get_stock_data(selected_tickers)
 
@@ -220,8 +214,8 @@ if not df_close.empty:
         pct_above_50_hist = ((df_close > sma_50_hist).sum(axis=1) / daily_active_stocks) * 100
         pct_above_200_hist = ((df_close > sma_200_hist).sum(axis=1) / daily_active_stocks) * 100
         
-        # 252 trading days * 5 years = 1260 days
-        plot_dates = df_close.tail(1260).index 
+        # Slices dataframe based on user slider input
+        plot_dates = df_close.tail(history_days).index 
         
         fig_line = go.Figure()
         
@@ -247,6 +241,34 @@ if not df_close.empty:
         )
         
         st.plotly_chart(fig_line, use_container_width=True)
+
+    # Row 4: Component Contribution Table
+    st.markdown("---")
+    st.subheader(f"Component Performance & Index Contribution ({timeframe_choice})")
+    
+    # Construct the table combining weights and price changes
+    df_table = df_weights.set_index('Symbol').copy()
+    
+    # Map the latest percentage change (converted to a 100-based percentage)
+    df_table['Price Change (%)'] = pct_change_latest * 100
+    
+    # Calculate Contribution: (Price Change %) * (Weight as decimal)
+    df_table['Contribution (%)'] = df_table['Price Change (%)'] * (df_table['Weight'] / 100)
+    
+    # Clean up NaNs (stocks that may have failed to download or delisted)
+    df_table = df_table.dropna().reset_index()
+    
+    # Sort by the most impactful movers descending
+    df_table = df_table.sort_values(by='Contribution (%)', ascending=False)
+    
+    # Use Pandas Styler to format decimals and add a heatmap color gradient
+    styled_table = df_table.style.format({
+        'Weight': '{:.4f}%',
+        'Price Change (%)': '{:.2f}%',
+        'Contribution (%)': '{:.4f}%'
+    }).background_gradient(subset=['Contribution (%)', 'Price Change (%)'], cmap='RdYlGn')
+    
+    st.dataframe(styled_table, use_container_width=True, height=500)
 
 else:
     st.error("Could not retrieve data. Please check your internet connection or try again later.")
