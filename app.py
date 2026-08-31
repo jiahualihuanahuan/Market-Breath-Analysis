@@ -43,7 +43,7 @@ def get_tickers():
     
     # Fetch Nasdaq 100 tickers
     try:
-        nasdaq_url = 'https://en.wikipedia.org/wiki/Nasdaq-100'
+        nasdaq_url = "https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies"
         resp_nasdaq = requests.get(nasdaq_url, headers=headers)
         nasdaq_tables = pd.read_html(io.StringIO(resp_nasdaq.text))
         
