@@ -17,9 +17,9 @@ st.markdown("Analyze how many stocks are moving up, down, or flat, and see how t
 
 # --- 1. DATA RETRIEVAL FUNCTIONS ---
 
-@st.cache_data(show_spinner="Fetching index components from sources...")
+@st.cache_data(show_spinner="Fetching index components from Slickcharts...")
 def get_tickers():
-    """Scrapes Wikipedia and Slickcharts for index tickers with a custom User-Agent."""
+    """Scrapes Slickcharts for S&P 500, Nasdaq 100, and Dow Jones tickers."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
@@ -28,9 +28,9 @@ def get_tickers():
     nasdaq_tickers = []
     dow_tickers = []
     
-    # Fetch S&P 500 tickers (Wikipedia)
+    # Fetch S&P 500 tickers (Slickcharts)
     try:
-        sp500_url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+        sp500_url = 'https://www.slickcharts.com/sp500'
         resp_sp = requests.get(sp500_url, headers=headers)
         sp500_tables = pd.read_html(io.StringIO(resp_sp.text))
         
@@ -41,17 +41,14 @@ def get_tickers():
     except Exception as e:
         st.error(f"Error fetching S&P 500 tickers: {e}")
     
-    # Fetch Nasdaq 100 tickers (Wikipedia)
+    # Fetch Nasdaq 100 tickers (Slickcharts)
     try:
-        nasdaq_url = 'https://en.wikipedia.org/wiki/Nasdaq-100'
+        nasdaq_url = 'https://www.slickcharts.com/nasdaq100'
         resp_nasdaq = requests.get(nasdaq_url, headers=headers)
         nasdaq_tables = pd.read_html(io.StringIO(resp_nasdaq.text))
         
         for table in nasdaq_tables:
-            if 'Ticker' in table.columns:
-                nasdaq_tickers = table['Ticker'].str.replace('.', '-', regex=False).tolist()
-                break
-            elif 'Symbol' in table.columns:
+            if 'Symbol' in table.columns:
                 nasdaq_tickers = table['Symbol'].str.replace('.', '-', regex=False).tolist()
                 break
     except Exception as e:
@@ -72,7 +69,7 @@ def get_tickers():
             
     return sp500_tickers, nasdaq_tickers, dow_tickers
 
-@st.cache_data(show_spinner="Downloading maximum historical data (this may take 1-3 minutes)...")
+@st.cache_data(show_spinner="Downloading historical data (this may take 1-3 minutes)...")
 def get_stock_data(tickers):
     """Downloads historical daily close prices for the provided tickers."""
     if not tickers:
@@ -224,7 +221,7 @@ if not df_close.empty:
         pct_above_200_hist = ((df_close > sma_200_hist).sum(axis=1) / daily_active_stocks) * 100
         
         # 252 trading days * 5 years = 1260 days
-        plot_dates = df_close.tail(1260).index
+        plot_dates = df_close.tail(1260).index 
         
         fig_line = go.Figure()
         
