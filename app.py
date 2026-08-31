@@ -1,3 +1,5 @@
+import io
+import requests
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -5,7 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import warnings
 
-# Suppress yfinance warnings for cleaner output
+# Suppress yfinance warnings
 warnings.filterwarnings('ignore')
 
 st.set_page_config(page_title="Market Breadth Analyzer", layout="wide")
@@ -17,19 +19,29 @@ st.markdown("Analyze how many stocks are moving up, down, or flat, and see how t
 
 @st.cache_data(show_spinner="Fetching index components from Wikipedia...")
 def get_tickers():
-    """Scrapes Wikipedia for the current S&P 500 and Nasdaq 100 tickers."""
-    # S&P 500
+    """Scrapes Wikipedia for the current S&P 500 and Nasdaq 100 tickers with a custom User-Agent."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    # Fetch S&P 500 tickers
     sp500_url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-    sp500_df = pd.read_html(sp500_url)[0]
+    resp_sp = requests.get(sp500_url, headers=headers)
+    sp500_df = pd.read_html(io.StringIO(resp_sp.text))[0]
     sp500_tickers = sp500_df['Symbol'].str.replace('.', '-', regex=False).tolist()
     
-    # Nasdaq 100
+    # Fetch Nasdaq 100 tickers
     nasdaq_url = 'https://en.wikipedia.org/wiki/Nasdaq-100'
-    nasdaq_tables = pd.read_html(nasdaq_url)
+    resp_nasdaq = requests.get(nasdaq_url, headers=headers)
+    nasdaq_tables = pd.read_html(io.StringIO(resp_nasdaq.text))
+    
     nasdaq_tickers = []
     for table in nasdaq_tables:
         if 'Ticker' in table.columns:
             nasdaq_tickers = table['Ticker'].str.replace('.', '-', regex=False).tolist()
+            break
+        elif 'Symbol' in table.columns:
+            nasdaq_tickers = table['Symbol'].str.replace('.', '-', regex=False).tolist()
             break
             
     return sp500_tickers, nasdaq_tickers
@@ -84,7 +96,7 @@ if not df_close.empty:
     resample_map = {
         "Daily": "D",
         "Weekly": "W",
-        "Monthly": "M",
+        "Monthly": "ME",
         "Quarterly": "Q",
         "Yearly": "Y"
     }
