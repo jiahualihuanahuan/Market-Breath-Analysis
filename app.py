@@ -97,7 +97,7 @@ if not df_close.empty:
         "Daily": "D",
         "Weekly": "W",
         "Monthly": "ME",
-        "Quarterly": "Q",
+        "Quarterly": "QE",
         "Yearly": "Y"
     }
     freq = resample_map[timeframe_choice]
