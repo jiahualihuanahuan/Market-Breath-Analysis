@@ -24,38 +24,64 @@ def get_tickers():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
+    sp500_tickers = []
+    nasdaq_tickers = []
+    
     # Fetch S&P 500 tickers
-    sp500_url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-    resp_sp = requests.get(sp500_url, headers=headers)
-    sp500_df = pd.read_html(io.StringIO(resp_sp.text))[0]
-    sp500_tickers = sp500_df['Symbol'].str.replace('.', '-', regex=False).tolist()
+    try:
+        sp500_url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+        resp_sp = requests.get(sp500_url, headers=headers)
+        sp500_tables = pd.read_html(io.StringIO(resp_sp.text))
+        
+        # Look through tables to find the one with 'Symbol'
+        for table in sp500_tables:
+            if 'Symbol' in table.columns:
+                sp500_tickers = table['Symbol'].str.replace('.', '-', regex=False).tolist()
+                break
+    except Exception as e:
+        st.error(f"Error fetching S&P 500 tickers: {e}")
     
     # Fetch Nasdaq 100 tickers
-    nasdaq_url = 'https://en.wikipedia.org/wiki/Nasdaq-100'
-    resp_nasdaq = requests.get(nasdaq_url, headers=headers)
-    nasdaq_tables = pd.read_html(io.StringIO(resp_nasdaq.text))
-    
-    nasdaq_tickers = []
-    for table in nasdaq_tables:
-        if 'Ticker' in table.columns:
-            nasdaq_tickers = table['Ticker'].str.replace('.', '-', regex=False).tolist()
-            break
-        elif 'Symbol' in table.columns:
-            nasdaq_tickers = table['Symbol'].str.replace('.', '-', regex=False).tolist()
-            break
+    try:
+        nasdaq_url = 'https://en.wikipedia.org/wiki/Nasdaq-100'
+        resp_nasdaq = requests.get(nasdaq_url, headers=headers)
+        nasdaq_tables = pd.read_html(io.StringIO(resp_nasdaq.text))
+        
+        # Look through tables to find the one with 'Ticker' or 'Symbol'
+        for table in nasdaq_tables:
+            if 'Ticker' in table.columns:
+                nasdaq_tickers = table['Ticker'].str.replace('.', '-', regex=False).tolist()
+                break
+            elif 'Symbol' in table.columns:
+                nasdaq_tickers = table['Symbol'].str.replace('.', '-', regex=False).tolist()
+                break
+    except Exception as e:
+        st.error(f"Error fetching Nasdaq 100 tickers: {e}")
             
     return sp500_tickers, nasdaq_tickers
 
 @st.cache_data(show_spinner="Downloading maximum historical data (this may take 1-3 minutes)...")
 def get_stock_data(tickers):
     """Downloads historical daily close prices for the provided tickers."""
-    # Using 'max' as requested, though '5y' or '10y' is usually faster
+    
+    # Safeguard: Do not attempt download if the ticker list is empty
+    if not tickers:
+        st.warning("No tickers found to download. Please check the data source.")
+        return pd.DataFrame()
+        
     data = yf.download(tickers, period="max", threads=True, progress=False)
+    
+    # Safeguard: Ensure data isn't empty before trying to parse columns
+    if data.empty:
+        return pd.DataFrame()
+        
     # yfinance returns a MultiIndex column structure when querying multiple tickers
-    if 'Close' in data.columns.levels[0]:
+    if isinstance(data.columns, pd.MultiIndex) and 'Close' in data.columns.levels[0]:
         return data['Close']
+    elif 'Close' in data.columns:
+        return data['Close'] # Fallback for single tickers or different yfinance versions
     else:
-        return data  # Fallback
+        return data
 
 # --- 2. SIDEBAR & USER INPUTS ---
 
