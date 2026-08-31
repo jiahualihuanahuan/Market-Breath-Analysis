@@ -127,7 +127,7 @@ if not df_close.empty:
     
     # --- CALCULATIONS: Price Change ---
     resample_map = {
-        "Daily": "B",
+        "Daily": "D",
         "Weekly": "W",
         "Monthly": "ME",
         "Quarterly": "QE",
