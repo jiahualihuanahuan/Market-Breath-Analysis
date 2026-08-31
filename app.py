@@ -32,11 +32,11 @@ def get_tickers():
             for table in tables:
                 if 'Symbol' in table.columns and 'Weight' in table.columns:
                     df = table[['Symbol', 'Weight']].copy()
-                    df['Symbol'] = df['Symbol'].str.replace('.', '-', regex=False)
+                    df['Symbol'] = df['Symbol'].astype(str).str.replace('.', '-', regex=False)
                     
-                    # Clean up weight column (remove '%' if present and convert to float)
-                    if df['Weight'].dtype == object:
-                        df['Weight'] = df['Weight'].astype(str).str.replace('%', '', regex=False).astype(float)
+                    # Force clean the weight column into numeric floats safely
+                    df['Weight'] = df['Weight'].astype(str).str.replace('%', '', regex=False)
+                    df['Weight'] = pd.to_numeric(df['Weight'], errors='coerce').fillna(0.0)
                     
                     return df
         except Exception as e:
