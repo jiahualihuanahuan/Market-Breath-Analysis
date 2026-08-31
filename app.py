@@ -120,17 +120,18 @@ df_close = get_stock_data(selected_tickers)
 if not df_close.empty:
     
     # --- CALCULATIONS: Price Change ---
+    # Updated frequencies for Pandas 2.2+ compatibility
     resample_map = {
-        "Daily": "D",
+        "Daily": "B",      # Business days
         "Weekly": "W",
-        "Monthly": "M",
-        "Quarterly": "Q",
-        "Yearly": "Y"
+        "Monthly": "ME",   # Month End
+        "Quarterly": "QE", # Quarter End
+        "Yearly": "YE"     # Year End
     }
-    freq = resample_map[timeframe_choice]
+    freq = resample_map.get(timeframe_choice, "B")
     
-    # Resample data to the chosen timeframe
-    df_resampled = df_close.resample(freq).last()
+    # Resample and drop any days where the market was closed (all NaNs)
+    df_resampled = df_close.resample(freq).last().dropna(how='all')
     
     # Calculate percentage change for the latest period
     pct_change_latest = df_resampled.pct_change().iloc[-1]
@@ -261,14 +262,18 @@ if not df_close.empty:
     # Sort by the most impactful movers descending
     df_table = df_table.sort_values(by='Contribution (%)', ascending=False)
     
-    # Use Pandas Styler to format decimals and add a heatmap color gradient
-    styled_table = df_table.style.format({
-        'Weight': '{:.4f}%',
-        'Price Change (%)': '{:.2f}%',
-        'Contribution (%)': '{:.4f}%'
-    }).background_gradient(subset=['Contribution (%)', 'Price Change (%)'], cmap='RdYlGn')
-    
-    st.dataframe(styled_table, use_container_width=True, height=500)
+    # Safeguard: Ensure the table isn't empty before applying colors
+    if df_table.empty:
+        st.warning("No valid data available to construct the contribution table for this period.")
+    else:
+        # Use Pandas Styler to format decimals and add a heatmap color gradient
+        styled_table = df_table.style.format({
+            'Weight': '{:.4f}%',
+            'Price Change (%)': '{:.2f}%',
+            'Contribution (%)': '{:.4f}%'
+        }).background_gradient(subset=['Contribution (%)', 'Price Change (%)'], cmap='RdYlGn')
+        
+        st.dataframe(styled_table, use_container_width=True, height=500)
 
 else:
     st.error("Could not retrieve data. Please check your internet connection or try again later.")
