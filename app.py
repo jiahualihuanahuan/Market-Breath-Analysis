@@ -201,5 +201,56 @@ if not df_close.empty:
     c4.metric(label="Above 50-Day SMA", value=f"{above_50} / {total_ma}", delta=f"{(above_50/total_ma)*100:.1f}%")
     c5.metric(label="Above 200-Day SMA", value=f"{above_200} / {total_ma}", delta=f"{(above_200/total_ma)*100:.1f}%")
 
+
+    # Row 3: Historical Breadth Line Chart ---
+    st.markdown("---")
+    st.subheader("Historical Market Breadth (% of Stocks Above SMA)")
+    
+    with st.spinner("Calculating historical moving averages..."):
+        # 1. Calculate historical SMAs for the entire dataframe
+        sma_20_hist = df_close.rolling(window=20).mean()
+        sma_50_hist = df_close.rolling(window=50).mean()
+        sma_200_hist = df_close.rolling(window=200).mean()
+        
+        # 2. Count active stocks per day (ignores NaNs for stocks that IPO'd recently)
+        daily_active_stocks = df_close.count(axis=1)
+        
+        # 3. Calculate historical percentage of stocks above their SMA
+        pct_above_20_hist = ((df_close > sma_20_hist).sum(axis=1) / daily_active_stocks) * 100
+        pct_above_50_hist = ((df_close > sma_50_hist).sum(axis=1) / daily_active_stocks) * 100
+        pct_above_200_hist = ((df_close > sma_200_hist).sum(axis=1) / daily_active_stocks) * 100
+        
+        # 4. Limit to the last 5 years to keep the chart performant and readable
+        # (Optional: remove '.last("5Y")' to show the absolute maximum history)
+        plot_dates = df_close.last("5Y").index
+        
+        # 5. Build the Plotly line chart
+        fig_line = go.Figure()
+        
+        fig_line.add_trace(go.Scatter(
+            x=plot_dates, y=pct_above_20_hist.loc[plot_dates], 
+            mode='lines', name='> 20-Day SMA', line=dict(width=1, color='#00cc96')
+        ))
+        fig_line.add_trace(go.Scatter(
+            x=plot_dates, y=pct_above_50_hist.loc[plot_dates], 
+            mode='lines', name='> 50-Day SMA', line=dict(width=1, color='#ab63fa')
+        ))
+        fig_line.add_trace(go.Scatter(
+            x=plot_dates, y=pct_above_200_hist.loc[plot_dates], 
+            mode='lines', name='> 200-Day SMA', line=dict(width=1.5, color='#ef553b')
+        ))
+        
+        # 6. Format the chart layout
+        fig_line.update_layout(
+            xaxis_title="Date",
+            yaxis_title="Percentage of Stocks (%)",
+            hovermode="x unified", # Shows all 3 values in a single tooltip on hover
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(l=0, r=0, t=30, b=0)
+        )
+        
+        st.plotly_chart(fig_line, use_container_width=True)
+
+
 else:
     st.error("Could not retrieve data. Please check your internet connection or try again later.")
